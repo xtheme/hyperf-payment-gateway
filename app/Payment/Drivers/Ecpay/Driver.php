@@ -1,0 +1,168 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Payment\Drivers\Ecpay;
+
+use App\Payment\Contracts\DriverPaymentInterface;
+use App\Payment\Drivers\AbstractDriver;
+use Hyperf\HttpServer\Contract\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+
+use function Hyperf\Support\make;
+
+class Driver extends AbstractDriver implements DriverPaymentInterface
+{
+    /**
+     * ============================================
+     *  三方配置
+     * ============================================
+     */
+    protected bool $amountToDollar = true;
+
+    protected string $signField = 'CheckMacValue';
+
+    protected string $notifySuccessText = '1|OK';
+
+    protected string $notifyFailText = '0|FAIL';
+
+    /**
+     * 创建代收订单, 返回支付网址
+     */
+    public function orderCreate(RequestInterface $request): ResponseInterface
+    {
+        return make(OrderCreate::class, ['config' => $this->config])->request($request);
+    }
+
+    /**
+     * 三方回調通知, 更新訂單
+     */
+    public function orderNotify(RequestInterface $request): ResponseInterface
+    {
+        return make(OrderNotify::class, ['config' => $this->config])->request($request);
+    }
+
+    /**
+     * 查詢訂單(交易), 返回訂單明細
+     */
+    public function orderQuery(RequestInterface $request): ResponseInterface
+    {
+        return make(OrderQuery::class, ['config' => $this->config])->request($request);
+    }
+
+    /**
+     * [Mock] 返回三方渠道回调参数
+     */
+    public function mockNotify(string $orderNo): ResponseInterface
+    {
+        return make(MockNotify::class, ['config' => $this->config])->request($orderNo);
+    }
+
+    /**
+     * [Mock] 返回集成网关查询订单参数
+     */
+    public function mockQuery(string $orderNo): ResponseInterface
+    {
+        return make(MockQuery::class, ['config' => $this->config])->request($orderNo);
+    }
+
+    /**
+     * ============================================
+     *  支付渠道共用方法
+     * ============================================
+     */
+
+    /**
+     * 转换三方订单状态, 返回统一的状态码到集成网关
+     */
+    public function transformStatus($status): string
+    {
+        // 三方支付状态: RtnCode=1時，為付款成功
+        // 集成订单状态: 1=待付款, 2=支付成功, 3=金額調整, 4=交易失敗, 5=逾期失效
+        return match ($status) {
+            '0' => '1',
+            '1' => '2',
+            default => '4',
+        };
+    }
+
+    /**
+     * 通知三方回調結果
+     */
+    public function responsePlatform(string $code = ''): ResponseInterface
+    {
+        // 集成网关返回
+        if ('00' != $code) {
+            // todo 请依据三方逻辑订制回调失败返回内容
+            return response()->raw($this->notifyFailText);
+        }
+
+        // todo 请依据三方逻辑订制回调成功返回内容
+        return response()->raw($this->notifySuccessText);
+    }
+
+    /**
+     * 簽名規則
+     */
+    protected function getSignature(array $data, string $signatureKey): string
+    {
+        if (isset($data[$this->signField])) {
+            unset($data[$this->signField]);
+        }
+
+        // todo 以下为范本, 请依据三方签名逻辑订制
+        // 1. 字典排序
+        ksort($data);
+
+        // 2. 排除空值欄位參與簽名  綠界callback簽名不排除空欄位
+        $tempData = $data;
+
+        [$HashKey, $HashIV] = explode('|', $signatureKey);
+
+        // 3. $tempData 轉成字串
+        $tempStr = 'HashKey=' . $HashKey . '&';
+        $tempStr .= urldecode(http_build_query($tempData));
+        $tempStr .= '&HashIV=' . $HashIV;
+
+        // 一連串處理
+        $encoded = urlencode($tempStr);
+        $lower = strtolower($encoded);
+        $dotNetFormat = self::toDotNetUrlEncode($lower);
+        $hash = hash('sha256', $dotNetFormat);
+
+        return strtoupper($hash);
+    }
+
+    /**
+     * ============================================
+     *  代收接口
+     * ============================================
+     */
+
+    /**
+     * 轉換為 .net URL 編碼結果
+     */
+    private static function toDotNetUrlEncode(string $source): string
+    {
+        $search = [
+            '%2d',
+            '%5f',
+            '%2e',
+            '%21',
+            '%2a',
+            '%28',
+            '%29',
+        ];
+        $replace = [
+            '-',
+            '_',
+            '.',
+            '!',
+            '*',
+            '(',
+            ')',
+        ];
+
+        return str_replace($search, $replace, $source);
+    }
+}

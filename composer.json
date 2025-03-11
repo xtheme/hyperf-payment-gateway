@@ -1,0 +1,97 @@
+{
+  "name": "hm/php-payment-gateway",
+  "type": "project",
+  "keywords": [
+    "php",
+    "swoole",
+    "framework",
+    "hyperf",
+    "microservice",
+    "middleware"
+  ],
+  "description": "A coroutine framework that focuses on hyperspeed and flexible, specifically use for build microservices and middlewares.",
+  "license": "Apache-2.0",
+  "require": {
+    "php": ">=8.3",
+    "ext-bcmath": "*",
+    "ext-json": "*",
+    "ext-openssl": "*",
+    "ext-pdo": "*",
+    "ext-pdo_mysql": "*",
+    "ext-redis": "*",
+    "friendsofhyperf/cache": "~3.1.0",
+    "friendsofhyperf/http-client": "~3.1.0",
+    "friendsofhyperf/lock": "~3.1.0",
+    "hyperf/async-queue": "~3.1.0",
+    "hyperf/cache": "~3.1.0",
+    "hyperf/command": "~3.1.0",
+    "hyperf/config": "~3.1.0",
+    "hyperf/constants": "~3.1.0",
+    "hyperf/crontab": "~3.1.0",
+    "hyperf/database": "~3.1.0",
+    "hyperf/db-connection": "~3.1.0",
+    "hyperf/devtool": "~3.1.0",
+    "hyperf/framework": "~3.1.0",
+    "hyperf/guzzle": "~3.1.0",
+    "hyperf/http-server": "~3.1.0",
+    "hyperf/logger": "~3.1.0",
+    "hyperf/memory": "~3.1.0",
+    "hyperf/metric": "~3.1.0",
+    "hyperf/process": "~3.1.0",
+    "hyperf/rate-limit": "~3.1.0",
+    "hyperf/redis": "~3.1.0",
+    "hyperf/translation": "~3.1.0",
+    "hyperf/validation": "~3.1.0",
+    "hyperf/view-engine": "~3.1.0",
+    "promphp/prometheus_client_php": "^2.10",
+    "ramsey/uuid": "^4.7"
+  },
+  "require-dev": {
+    "filp/whoops": "^2.15",
+    "friendsofhyperf/rector": "^0.2.0",
+    "friendsofphp/php-cs-fixer": "^3.0",
+    "hyperf/ide-helper": "~3.1.0",
+    "hyperf/testing": "~3.1.0",
+    "hyperf/watcher": "~3.1.0",
+    "mockery/mockery": "^1.5",
+    "phpstan/phpstan": "^1.0",
+    "swoole/ide-helper": "^5.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    },
+    "files": [
+      "app/Common/Helper.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "HyperfTest\\": "./test/"
+    }
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "config": {
+    "optimize-autoloader": true,
+    "sort-packages": true
+  },
+  "extra": [],
+  "scripts": {
+    "post-root-package-install": [
+      "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+    ],
+    "post-autoload-dump": [
+      "rm -rf runtime/container"
+    ],
+    "test": "co-phpunit --prepend test/bootstrap.php -c phpunit.xml --colors=always",
+    "cs-fix": "php-cs-fixer fix $1",
+    "cs-fix-app": "php-cs-fixer fix ./app",
+    "cs-fix-models": "php-cs-fixer fix ./app/Model",
+    "analyse": "phpstan analyse --memory-limit 300M -l 0 -c phpstan.neon ./app",
+    "start": [
+      "Composer\\Config::disableProcessTimeout",
+      "php ./bin/hyperf.php start"
+    ]
+  }
+}

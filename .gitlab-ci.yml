@@ -1,0 +1,78 @@
+#
+stages:          # List of stages for jobs, and their order of execution
+  - build
+  - deploy
+
+build-job:       # This job runs in the build stage, which runs first.
+  stage: build
+  tags:
+    - yc-dev-runner
+  only:
+    refs:
+      - develop
+  script:
+    - docker build -f Dockerfile -t asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:dev .
+    - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin asia-east2-docker.pkg.dev
+    - docker push asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:dev
+
+deploy-job:      # This job runs in the deploy stage.
+  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
+  tags:
+    - yc-dev-runner
+  only:
+    refs:
+      - develop
+  script:
+    - echo "Deploying application..."
+    - helm upgrade --kubeconfig /home/gitlab-runner/.kube/config-list/dev --install "${CI_PROJECT_NAME}" --wait -f /home/gitlab-runner/hm-helm/helm-charts/gp/${CI_PROJECT_NAME}/values.yaml.dev --set global.release=$(echo "dev-`date +%F-%T`") /home/gitlab-runner/hm-helm/helm-charts/gp/${CI_PROJECT_NAME} -n game-dev
+  after_script:
+    - docker image prune --force
+
+build-stage-job: 
+    stage: build
+    tags: 
+      - gitlab-shared-runner
+    only: 
+      refs: 
+        - /^release/(.*)/
+    script: 
+      - docker build -f Dockerfile -t asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:staging .
+      - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin asia-east2-docker.pkg.dev
+      - docker push asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:staging
+
+deploy-stage-job: 
+  stage: deploy
+  tags: 
+    - gitlab-shared-runner
+  only: 
+    refs: 
+      - /^release/(.*)/
+  script: 
+    - helm upgrade --kubeconfig /home/gitlab-runner/.kube/config-list/stt --install "${CI_PROJECT_NAME}" -f /home/gitlab-runner/hm-helm/helm-charts/gp/${CI_PROJECT_NAME}/values.yaml.staging --set global.release=`echo ${CI_COMMIT_BRANCH}|cut -d'/' -f2` -n staging-gp --wait /home/gitlab-runner/hm-helm/helm-charts/gp/${CI_PROJECT_NAME}
+    - bash /home/gitlab-runner/tg-notify.sh gp staging ${CI_PROJECT_NAME} `echo ${CI_COMMIT_BRANCH}|cut -d'/' -f2`
+
+build-prod-job:       # This job runs in the build stage, which runs first.
+  stage: build
+  tags:
+    - yc-prod-runner
+  only:
+    refs:
+      - tags
+  script:
+    - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin asia-east2-docker.pkg.dev
+    - docker pull asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:staging
+    - docker tag asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:staging asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:${CI_COMMIT_TAG}
+    - docker push asia-east2-docker.pkg.dev/wgp-project-337610/game-platform/${CI_PROJECT_NAME}:${CI_COMMIT_TAG}
+
+deploy-prod-job:      # This job runs in the deploy stage.
+  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
+  tags:
+    - yc-prod-runner
+  only:
+    refs:
+      - tags
+  script:
+    - helm upgrade --kubeconfig /home/gitlab-runner/.kube/config-list/hmg --install "${CI_PROJECT_NAME}" --wait --wait-for-jobs --timeout 60m --set global.release=${CI_COMMIT_TAG} --set global.image.tag=${CI_COMMIT_TAG} /home/gitlab-runner/hm-helm/helm-charts/hmg/${CI_PROJECT_NAME} -n prod --atomic
+    - echo "Deploying application..."
+    - echo "Application successfully deployed."
+    - bash /home/gitlab-runner/tg-notify.sh hmg prod ${CI_PROJECT_NAME} ${CI_COMMIT_TAG}

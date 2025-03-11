@@ -1,0 +1,81 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Payment\Drivers\BCOTC;
+
+use App\Common\Response;
+use App\Constants\ErrorCode;
+use App\Exception\ApiException;
+use Hyperf\HttpServer\Contract\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+
+class OrderNotify extends OrderQuery
+{
+    /**
+     * 三方回調通知, 更新訂單
+     */
+    public function request(RequestInterface $request): ResponseInterface
+    {
+        // {"merchant_id":"3503b15c-add2-45c8-af89-1f6b57cbe9d9","order_id":"ef677269-ff86-46b4-bd68-657601dd5a37","merchant_order_id":"otc_86889561","amount":"200.000000","crypto_amount":"25.050000","status":"completed","completed_at":1716955405.357389,"md5_sign":"02b3693d9708b78fd3c22593ef3c62b4"}
+        $callback = $request->all();
+
+        $orderNo = $callback['merchant_order_id'] ?? '';
+
+        $this->logger->info(sprintf('%s 回調參數', $orderNo), $callback);
+
+        // 查询订单
+        $order = $this->getOrder($orderNo);
+
+        // 验证签名
+        if (false === $this->verifySignature($callback, $order['merchant_key'])) {
+            return Response::error('验证签名失败', ErrorCode::ERROR, ['order_no' => $orderNo]);
+        }
+
+        // 二次校驗
+        $this->doubleCheck($callback, $orderNo, $order);
+
+        $update = [
+            'status' => $this->transformStatus($callback['status']),
+            'real_amount' => $callback['amount'],
+            'trade_no' => $callback['order_id'],
+        ];
+        $this->updateOrder($orderNo, $update);
+
+        // 回调集成网址
+        $callbackUrl = $order['callback_url'];
+
+        // 返回数据给集成网关更新
+        $params = $this->transferOrderInfo($callback, $order);
+
+        // 回调集成网关
+        $response = $this->sendCallback($callbackUrl, $orderNo, $params);
+
+        // 通知三方回调结果
+        return $this->responsePlatform($response['code'] ?? '01');
+    }
+
+    /**
+     * 若创建订单时带有三方查询网址 query_url 参数则可发起二次校验
+     */
+    private function doubleCheck(array $callback, string $orderNo, array $order): void
+    {
+        if (empty($order['query_url'])) {
+            return;
+        }
+
+        // Custom header params
+        $this->appendHeaders($order['header_params']);
+
+        // 验签成功, 调用第三方查询接口判断该订单在第三方系统里是否支付成功
+        $response = $this->queryOrderInfo($order['query_url'], $order);
+
+        if (1 !== $response['status']) {
+            throw new ApiException('查單失敗 ' . $orderNo);
+        }
+
+        if ($response['response']['status'] != $callback['status']) {
+            throw new ApiException('訂單狀態確認失敗 ' . $orderNo);
+        }
+    }
+}
